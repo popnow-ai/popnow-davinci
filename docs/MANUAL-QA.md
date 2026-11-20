@@ -31,8 +31,13 @@ second clip on V2 that starts later.
 
 8. Clip tab shows the clip's name and length. Move the playhead to the V2 clip, click into
    the panel: the name updates.
-9. **Edit video**: write a change, click **Get price**. The source file uploads, then the button
-   reads `Create · N credits`. Nothing is charged yet (balance unchanged).
+9. **Edit video**: trim the V1 clip to about 3 s from the middle of a longer source. Write a
+   change, click **Get price**. The source file uploads, the status shows `Cutting 3.0 s…`, then
+   the button reads `Edit · 3.0 s · N credits`. Nothing is charged yet (balance unchanged). In
+   popnow.ai/assets the cut is the same 3 s as the timeline (check the first and last frame).
+   Repeat with a clip whose source frame rate differs from the timeline (e.g. 60 fps source on a
+   24 fps timeline) and one with a speed change: the cut must still match.
+9b. With an untrimmed clip (whole source on the timeline) there is no `Cutting` step.
 10. Click it. Status shows progress; **Stop waiting** appears. 📸 When done, the result is in the
     media pool bin **PopNow** and on a **new video track**, starting at the clip's start.
 11. **Video to audio**: result lands on a **new stereo audio track** at the clip's start, as

@@ -39,6 +39,7 @@ class Fake(object):
         self.poll_delay = 0
         self.json = False
         self.consent_required = False
+        self.compose_fails = False
         self.polls = 0
         fake = self
 
@@ -176,11 +177,18 @@ class Fake(object):
             return text("ready", {"upload_id": "up_1", "url": self.origin + "/upload/tok123"})
         if name == "get_upload":
             return text("1 file", {"upload_id": "up_1", "files": [{"popnow_link": "popnow://f/src", "name": "frame.png"}]})
+        if name == "compose_video":
+            self.polls = 0
+            if self.compose_fails:
+                return text("Couldn't edit these clips.", None, True)
+            return text("Started!", {"job_id": "rnd_1", "status": "running", "free": True})
         if name == "get_job":
             if self.poll_delay:
                 time.sleep(self.poll_delay)
             self.polls += 1
             if self.polls > self.polls_before_done:
+                if args["job_id"] == "rnd_1":
+                    return text("Done!", {"job_id": "rnd_1", "status": "succeeded", "files": [{"url": self.origin + "/media/cut.mp4", "popnow_link": "popnow://g/cut", "type": "video/mp4"}]})
                 return text("Done!", {"job_id": args["job_id"], "status": "succeeded", "files": [{"url": self.origin + "/media/x.png", "type": "image/png"}]})
             return text("Still making it.", {"job_id": args["job_id"], "status": "running"})
         price = self.prices.get(name, 0) + self.raise_by
@@ -202,12 +210,15 @@ class FakeHost(object):
     def __init__(self, folder):
         self.folder = folder
         self.placed = []
+        self.clip = {}
 
     def current_clip(self):
         path = os.path.join(self.folder, "clip.mov")
         with open(path, "wb") as handle:
             handle.write(b"\0" * 512)
-        return {"name": "Clip A", "file_path": path, "record_frame": 86400, "seconds": 4.2}
+        clip = {"name": "Clip A", "file_path": path, "record_frame": 86400, "seconds": 4.2, "source_start": 0.0, "whole_source": True, "aspect": "16:9"}
+        clip.update(self.clip)
+        return clip
 
     def export_frame(self, folder, name):
         path = os.path.join(folder, name)
@@ -335,6 +346,36 @@ class ScriptTests(unittest.TestCase):
         self.controller.create(quote["quote_id"])
         self.assertEqual(self.host.placed[0][1:], ("audio", 86400))
 
+    def test_prices_only_the_used_part_of_the_clip(self):
+        self.host.clip = {"source_start": 7.25, "seconds": 3.0, "whole_source": False, "aspect": "9:16"}
+        self.sign_in()
+        quote = self.controller.price("add-sound", "")
+        self.assertEqual([c["args"] for c in self.calls("compose_video")],
+                         [{"clips": [{"url": "popnow://f/src", "start_seconds": 7.25, "duration_seconds": 3.0}], "aspect_ratio": "9:16"}])
+        self.assertEqual(self.calls("estimate_cost")[0]["args"]["arguments"], {"video_url": "popnow://g/cut", "duration_seconds": 3})
+        self.assertEqual((quote["seconds"], quote["verb"], quote["whole_source_price"]), (3.0, "Add sound", False))
+        self.assertEqual(P.button_label(quote), "Add sound · 3.0 s · 30 credits")
+        self.assertEqual(self.calls("add_sound"), [])
+        self.controller.create(quote["quote_id"])
+        self.assertEqual(self.calls("add_sound")[0]["args"], {"video_url": "popnow://g/cut", "duration_seconds": 3, "max_credits": 30})
+
+    def test_whole_source_skips_the_cut(self):
+        self.sign_in()
+        quote = self.controller.price("add-sound", "")
+        self.assertEqual(self.calls("compose_video"), [])
+        self.assertFalse(quote["whole_source_price"])
+        self.assertEqual(self.calls("estimate_cost")[0]["args"]["arguments"]["video_url"], "popnow://f/src")
+
+    def test_failed_cut_prices_the_whole_source_and_says_so(self):
+        self.host.clip = {"source_start": 1.0, "seconds": 2.0, "whole_source": False}
+        self.fake.compose_fails = True
+        self.sign_in()
+        quote = self.controller.price("add-sound", "")
+        self.assertTrue(quote["whole_source_price"])
+        self.assertIn("Priced on the whole source clip", P.button_label(quote))
+        self.assertEqual(self.calls("estimate_cost")[0]["args"]["arguments"]["video_url"], "popnow://f/src")
+        self.assertEqual(self.calls("add_sound"), [])
+
     def test_stop_waiting_leaves_the_job_running(self):
         self.fake.polls_before_done = 100
         self.fake.poll_delay = 0.05
@@ -403,6 +444,11 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(P.timecode_to_frames("01:00:00:00", 24), 86400)
         self.assertEqual(P.timecode_to_frames("00:01:00;02", 29.97), 1800)
         self.assertEqual(P.timecode_to_frames("00:10:00;00", 29.97), 17982)
+
+    def test_nearest_aspect(self):
+        self.assertEqual(P.nearest_aspect("1920x1080"), "16:9")
+        self.assertEqual(P.nearest_aspect("1080x1920"), "9:16")
+        self.assertEqual(P.nearest_aspect(""), "16:9")
 
     def test_outcome_classification(self):
         self.assertEqual(P.outcome_of({"content": [{"type": "text", "text": "x"}], "structuredContent": {"needs_consent": True}})["kind"], "needs_consent")

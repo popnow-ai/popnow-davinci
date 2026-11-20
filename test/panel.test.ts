@@ -8,7 +8,7 @@ import { ACTIONS, actionById, defaults } from "../src/core/actions.js";
 import { discover } from "../src/core/oauth.js";
 import { Panel, type HostLike } from "../src/core/panel.js";
 import { configDirectory } from "../src/core/store.js";
-import { timecodeToFrames } from "../src/host/resolve.js";
+import { nearestAspect, timecodeToFrames } from "../src/host/resolve.js";
 import { startFake, type Fake } from "./fake.js";
 
 interface Placed {
@@ -17,9 +17,18 @@ interface Placed {
   frame: number;
 }
 
-function fakeHost(dir: string, placed: Placed[]): HostLike {
+function fakeHost(dir: string, placed: Placed[], clip: Partial<{ sourceStart: number; wholeSource: boolean; seconds: number; aspect: string }> = {}): HostLike {
   return {
-    currentClip: async () => ({ name: "Interview A", filePath: join(dir, "interview.mov"), recordFrame: 86_520, seconds: 6.25 }),
+    currentClip: async () => ({
+      name: "Interview A",
+      filePath: join(dir, "interview.mov"),
+      recordFrame: 86_520,
+      seconds: 6.25,
+      sourceStart: 0,
+      wholeSource: true,
+      aspect: "16:9",
+      ...clip,
+    }),
     exportFrame: async (folder, name) => {
       const path = join(folder, name);
       await writeFile(path, Buffer.from([137, 80, 78, 71]));
@@ -45,16 +54,18 @@ describe("DaVinci Resolve panel", () => {
     await writeFile(join(dir, "interview.mov"), Buffer.alloc(2048, 7));
     placed = [];
     opened = [];
+    clip = {};
   });
   afterEach(async () => {
     fake.server.close();
     await rm(dir, { recursive: true, force: true });
   });
 
+  let clip: Parameters<typeof fakeHost>[2] = {};
   const panel = (openUrl?: (url: string) => Promise<boolean>): Panel =>
     new Panel({
       fetch: globalThis.fetch,
-      host: fakeHost(dir, placed),
+      host: fakeHost(dir, placed, clip),
       sessionPath: join(dir, "config", "davinci-resolve.json"),
       mediaFolder: join(dir, "media"),
       tempFolder: join(dir, "tmp"),
@@ -147,6 +158,51 @@ describe("DaVinci Resolve panel", () => {
     // Asking again (another prompt) does not upload the same file twice.
     await p.price("edit-video", { prompt: "make it rain" });
     expect(fake.uploads.filter((u) => u.startsWith("PUT"))).toHaveLength(1);
+  });
+
+  it("prices only the part of the clip on the timeline: cuts it with the free compose_video first", async () => {
+    clip = { sourceStart: 12.5, seconds: 3, wholeSource: false, aspect: "16:9" };
+    const p = await signedIn();
+    const quote = await p.price("edit-video", { prompt: "make it snow" });
+    expect(quote).toMatchObject({ seconds: 3, verb: "Edit", wholeSourcePrice: false, credits: 400 });
+    // One clip, the used range, the source's shape; nothing else.
+    expect(toolCalls("compose_video").map((c) => c.args)).toEqual([
+      { clips: [{ url: "popnow://f/src", start_seconds: 12.5, duration_seconds: 3 }], aspect_ratio: "16:9" },
+    ]);
+    expect(toolCalls("estimate_cost")[0]?.args).toEqual({ tool: "edit_video", arguments: { video_url: "popnow://g/cut", prompt: "make it snow" } });
+    // The cut is free and starts nothing paid.
+    expect(toolCalls("edit_video")).toHaveLength(0);
+    expect(toolCalls("compose_video")[0]?.args?.max_credits).toBeUndefined();
+
+    await p.create(quote.quoteId, {});
+    expect(toolCalls("edit_video")[0]?.args).toEqual({ video_url: "popnow://g/cut", prompt: "make it snow", max_credits: 400 });
+
+    // Asking again for the same range reuses the cut.
+    await p.price("upscale", { size: "4k" });
+    expect(toolCalls("compose_video")).toHaveLength(1);
+    expect(toolCalls("estimate_cost").at(-1)?.args).toEqual({ tool: "upscale", arguments: { video_url: "popnow://g/cut", size: "4k" } });
+  });
+
+  it("skips the cut when the timeline uses the whole source file", async () => {
+    clip = { wholeSource: true, seconds: 6.25 };
+    const p = await signedIn();
+    const quote = await p.price("edit-video", { prompt: "x" });
+    expect(toolCalls("compose_video")).toHaveLength(0);
+    expect(quote).toMatchObject({ seconds: 6.25, verb: "Edit", wholeSourcePrice: false });
+    expect(toolCalls("estimate_cost")[0]?.args?.arguments).toMatchObject({ video_url: "popnow://f/src" });
+  });
+
+  it("falls back to pricing the whole source when the cut fails, and says so", async () => {
+    clip = { sourceStart: 4, seconds: 2, wholeSource: false };
+    fake.composeFails = true;
+    const p = await signedIn();
+    const quote = await p.price("edit-video", { prompt: "x" });
+    expect(quote.wholeSourcePrice).toBe(true);
+    expect(toolCalls("estimate_cost")[0]?.args?.arguments).toMatchObject({ video_url: "popnow://f/src" });
+    // Still nothing starts until the click, and the click sends the whole-source price.
+    expect(toolCalls("edit_video")).toHaveLength(0);
+    await p.create(quote.quoteId, {});
+    expect(toolCalls("edit_video")[0]?.args).toMatchObject({ video_url: "popnow://f/src", max_credits: 400 });
   });
 
   it("starts only at the quoted price, polls get_job, downloads and puts the result on a new track", async () => {
@@ -358,6 +414,13 @@ describe("host helpers", () => {
     expect(timecodeToFrames("01:00:05:12", 25)).toBe(90_137);
     expect(timecodeToFrames("00:01:00;02", 29.97)).toBe(1800);
     expect(timecodeToFrames("00:10:00;00", 29.97)).toBe(17_982);
+  });
+
+  it("picks the nearest shape for the cut", () => {
+    expect(nearestAspect("1920x1080")).toBe("16:9");
+    expect(nearestAspect("1080 x 1920")).toBe("9:16");
+    expect(nearestAspect("1440x1080")).toBe("1:1");
+    expect(nearestAspect("")).toBe("16:9");
   });
 
   it("keeps the sign-in file in the user's own profile", () => {

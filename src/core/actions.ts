@@ -41,6 +41,8 @@ export interface Action {
   free?: boolean;
   /** The user must tick the consent box before it can start (face and voice). */
   consent?: boolean;
+  /** Short word for the button on clip actions: "Edit · 3.0 s · 400 credits". */
+  verb?: string;
   fields: Field[];
   build: (input: BuildInput) => Record<string, unknown>;
 }
@@ -99,6 +101,7 @@ const VOICES: Option[] = [
 export const ACTIONS: readonly Action[] = [
   {
     id: "edit-video",
+    verb: "Edit",
     tool: "edit_video",
     title: "Edit video",
     source: "clip",
@@ -108,6 +111,7 @@ export const ACTIONS: readonly Action[] = [
   },
   {
     id: "add-sound",
+    verb: "Add sound",
     tool: "add_sound",
     title: "Video to audio",
     source: "clip",
@@ -121,6 +125,7 @@ export const ACTIONS: readonly Action[] = [
   },
   {
     id: "translate",
+    verb: "Translate",
     tool: "translate_video",
     title: "Video translator",
     source: "clip",
@@ -131,6 +136,7 @@ export const ACTIONS: readonly Action[] = [
   },
   {
     id: "upscale",
+    verb: "Upscale",
     tool: "upscale",
     title: "Upscale",
     source: "clip",
@@ -152,6 +158,7 @@ export const ACTIONS: readonly Action[] = [
   },
   {
     id: "reframe",
+    verb: "Reframe",
     tool: "reframe_video",
     title: "Reframe",
     source: "clip",

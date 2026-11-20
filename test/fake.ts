@@ -25,6 +25,8 @@ export interface Fake {
   raiseBy: number;
   /** Answer MCP with plain JSON instead of an event stream. */
   json: boolean;
+  /** compose_video (the free cut) answers with an error. */
+  composeFails: boolean;
   /** Override what the authorization-server metadata says. */
   meta?: Record<string, unknown>;
 }
@@ -47,6 +49,7 @@ const OUTPUT: Record<string, { file: string; type: string }> = {
   create_speech: { file: "vo.mp3", type: "audio/mpeg" },
   edit_image: { file: "frame.png", type: "image/png" },
   create_video: { file: "clip.mp4", type: "video/mp4" },
+  compose_video: { file: "cut.mp4", type: "video/mp4" },
 };
 
 export async function startFake(): Promise<Fake> {
@@ -64,6 +67,7 @@ export async function startFake(): Promise<Fake> {
     pollDelay: 0,
     raiseBy: 0,
     json: false,
+    composeFails: false,
   };
   let polls = 0;
   fake.server.on("request", async (request, response) => {
@@ -180,8 +184,18 @@ export async function startFake(): Promise<Fake> {
         const out = OUTPUT[tool] ?? { file: "x.bin", type: "application/octet-stream" };
         result =
           polls > fake.pollsBeforeDone
-            ? text("Done!", { job_id: args.job_id, status: "succeeded", credits: 400, files: [{ url: `${fake.origin}/media/${out.file}`, popnow_link: "popnow://g/1", type: out.type }] })
+            ? text("Done!", {
+                job_id: args.job_id,
+                status: "succeeded",
+                credits: tool === "compose_video" ? 0 : 400,
+                files: [{ url: `${fake.origin}/media/${out.file}`, popnow_link: tool === "compose_video" ? "popnow://g/cut" : "popnow://g/1", type: out.type }],
+              })
             : text("Still making it.", { job_id: args.job_id, status: "running" });
+      } else if (name === "compose_video") {
+        polls = 0;
+        result = fake.composeFails
+          ? text("Couldn't edit these clips: the source could not be read.", undefined, true)
+          : text("Started! job_id: job_compose_video", { job_id: "job_compose_video", status: "running", free: true });
       } else if (OUTPUT[name] || name === "reframe_video") {
         const price = (fake.prices[name] ?? 0) + fake.raiseBy;
         const max = typeof args.max_credits === "number" ? args.max_credits : 0;

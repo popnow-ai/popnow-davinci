@@ -14,7 +14,7 @@ const out = join(root, "docs", "screenshots");
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const require = createRequire(import.meta.url);
 const { ACTIONS } = require(join(built, "app", "core", "actions.js"));
-const actions = ACTIONS.map(({ id, title, source, output, free, consent, fields }) => ({ id, title, source, output, free: free === true, consent: consent === true, fields }));
+const actions = ACTIONS.map(({ id, title, verb, source, output, free, consent, fields }) => ({ id, title, verb, source, output, free: free === true, consent: consent === true, fields }));
 
 // The fake bridge answers like the main process would, then drives the panel into one state.
 const bridge = (scene) => `
@@ -26,8 +26,8 @@ const bridge = (scene) => `
     actions: () => ok(${JSON.stringify(actions)}),
     status: () => ok({ signedIn: true }),
     balance: () => ok(12480),
-    context: () => ok({ clip: { name: "A001_C014_beach_walk.mov", seconds: 6.2 } }),
-    price: (id) => ok({ quoteId: "q1", credits: prices[id] || 48, free: false, balance: 12480, affordable: true, consent: false }),
+    context: () => ok({ clip: { name: "A001_C014_beach_walk.mov", seconds: 3 } }),
+    price: (id) => ok({ quoteId: "q1", credits: prices[id] || 48, free: false, balance: 12480, affordable: true, consent: false, ...(id === "edit-video" ? { seconds: 3, verb: "Edit", wholeSourcePrice: false } : {}) }),
     create: () => { setTimeout(() => statusListener("You can keep editing."), 50); return new Promise(() => {}); },
     stopWaiting: () => ok(), getCredits: () => ok(true), openLibrary: () => ok(true), login: () => ok(), logout: () => ok(), cancelLogin: () => ok(),
     onStatus: (fn) => { statusListener = fn; return () => {}; },

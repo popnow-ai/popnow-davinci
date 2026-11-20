@@ -119,6 +119,35 @@ export async function start(
   return outcomeOf(await client.callTool(approved.tool, args, options.signal));
 }
 
+const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+
+/**
+ * Cuts the part of an uploaded source the timeline uses, with the free compose_video, and returns
+ * the cut's popnow:// link. One clip in, nothing added; the shape follows the source so a wide clip
+ * isn't boxed into the default tall frame.
+ */
+export async function trim(
+  client: AccountClient,
+  source: string,
+  cut: { startSeconds: number; durationSeconds: number; aspect: string },
+  options: { signal?: AbortSignal } = {},
+): Promise<string> {
+  const result = await client.callTool(
+    "compose_video",
+    {
+      clips: [{ url: source, start_seconds: round3(cut.startSeconds), duration_seconds: round3(cut.durationSeconds) }],
+      aspect_ratio: cut.aspect,
+    },
+    options.signal,
+  );
+  const outcome = outcomeOf(result);
+  if (outcome.kind !== "started") throw new Error("text" in outcome ? outcome.text : "PopNow could not cut the clip.");
+  const job = await waitForJob(client, outcome.job, { ...(options.signal ? { signal: options.signal } : {}), maxMs: 5 * 60_000 });
+  const link = job.status === "succeeded" ? job.files[0]?.popnowLink : undefined;
+  if (!link) throw new Error(job.text || "PopNow could not cut the clip.");
+  return link;
+}
+
 export function isDone(job: Job): boolean {
   return job.status === "succeeded" || job.status === "failed" || job.status === "blocked";
 }

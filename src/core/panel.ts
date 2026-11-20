@@ -8,6 +8,7 @@ import {
   quote,
   start,
   StoppedWaiting,
+  trim,
   waitForJob,
   type Job,
   type Quote,
@@ -27,7 +28,13 @@ export interface ClipLike {
   name: string;
   filePath: string;
   recordFrame: number;
+  /** Length on the timeline. */
   seconds: number;
+  /** Where the used part starts inside the source, in seconds. */
+  sourceStart: number;
+  /** The timeline uses the whole source file: no cut needed. */
+  wholeSource: boolean;
+  aspect: string;
 }
 
 export interface HostLike {
@@ -58,6 +65,12 @@ export interface PriceView {
   balance?: number;
   affordable: boolean;
   consent: boolean;
+  /** Clip actions: seconds of the clip that are priced and sent. */
+  seconds?: number;
+  /** Clip actions: the button word ("Edit · 3.0 s · N credits"). */
+  verb?: string;
+  /** Cutting the used part failed, so the price is for the whole source file. */
+  wholeSourcePrice?: boolean;
 }
 
 export type CreateView =
@@ -74,12 +87,14 @@ interface Pending {
   quote: Quote;
   recordFrame: number;
   expires: number;
+  clip?: { seconds: number; wholeSourcePrice: boolean };
 }
 
 const QUOTE_TTL_MS = 10 * 60_000;
 
 export class Panel {
   private readonly uploads = new UploadCache();
+  private readonly trims = new Map<string, string>();
   private readonly pending = new Map<string, Pending>();
   private loginAbort: AbortController | undefined;
   private runAbort: AbortController | undefined;
@@ -142,6 +157,7 @@ export class Panel {
     if (session) await revoke(this.options.fetch, session);
     await deleteSession(this.options.sessionPath);
     this.uploads.clear();
+    this.trims.clear();
     this.pending.clear();
     return { signedIn: false };
   }
@@ -172,12 +188,32 @@ export class Panel {
     let media: string | undefined;
     let recordFrame: number;
     let clipSeconds: number | undefined;
+    let clipInfo: Pending["clip"];
     if (action.source === "clip") {
       const clip = await this.options.host.currentClip();
       onStatus(`Sending ${clip.name}…`);
-      media = await this.uploads.link(client, this.options.fetch, clip.filePath);
+      const source = await this.uploads.link(client, this.options.fetch, clip.filePath);
+      media = source;
       recordFrame = clip.recordFrame;
       clipSeconds = clip.seconds;
+      let wholeSourcePrice = false;
+      if (!clip.wholeSource) {
+        // Price and send only the part on the timeline: cut it with the free compose_video first.
+        const key = `${source}|${clip.sourceStart.toFixed(3)}|${clip.seconds.toFixed(3)}|${clip.aspect}`;
+        try {
+          let cut = this.trims.get(key);
+          if (!cut) {
+            onStatus(`Cutting ${clip.seconds.toFixed(1)} s…`);
+            cut = await trim(client, source, { startSeconds: clip.sourceStart, durationSeconds: clip.seconds, aspect: clip.aspect });
+            this.trims.set(key, cut);
+          }
+          media = cut;
+        } catch {
+          // Fall back to the whole source; the button says so and nothing starts without a click.
+          wholeSourcePrice = true;
+        }
+      }
+      clipInfo = { seconds: clip.seconds, wholeSourcePrice };
     } else if (action.source === "frame") {
       await mkdir(this.options.tempFolder, { recursive: true });
       const frame = await this.options.host.exportFrame(this.options.tempFolder, `frame-${this.now()}.png`);
@@ -190,14 +226,16 @@ export class Panel {
     const args = action.build({ values, ...(media ? { media } : {}), ...(clipSeconds === undefined ? {} : { clipSeconds }) });
     onStatus("Checking the price…");
     const priced = await quote(client, action.tool, args, { free: action.free === true });
-    return this.remember(action, priced, recordFrame);
+    return this.remember(action, priced, recordFrame, clipInfo);
   }
 
-  private remember(action: Action, priced: Quote, recordFrame: number): PriceView {
+  private remember(action: Action, priced: Quote, recordFrame: number, clip?: Pending["clip"]): PriceView {
     for (const [id, item] of this.pending) if (item.expires < this.now()) this.pending.delete(id);
     const quoteId = randomBytes(9).toString("base64url");
-    this.pending.set(quoteId, { action, quote: priced, recordFrame, expires: this.now() + QUOTE_TTL_MS });
+    this.pending.set(quoteId, { action, quote: priced, recordFrame, expires: this.now() + QUOTE_TTL_MS, ...(clip ? { clip } : {}) });
     return {
+      ...(clip ? { seconds: clip.seconds, wholeSourcePrice: clip.wholeSourcePrice } : {}),
+      ...(action.verb ? { verb: action.verb } : {}),
       quoteId,
       credits: priced.credits,
       free: priced.free,
@@ -236,7 +274,7 @@ export class Panel {
       });
       if (outcome.kind === "price_changed") {
         // Never follow a higher price: show it and let the user decide again.
-        const again = this.remember(item.action, { ...item.quote, credits: outcome.credits }, item.recordFrame);
+        const again = this.remember(item.action, { ...item.quote, credits: outcome.credits }, item.recordFrame, item.clip);
         return { kind: "price_changed", quote: again };
       }
       if (outcome.kind !== "started") return outcome;

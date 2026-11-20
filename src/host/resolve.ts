@@ -19,6 +19,21 @@ export interface ClipInfo {
   durationFrames: number;
   fps: number;
   seconds: number;
+  /** Where the used part starts inside the source file, in seconds. */
+  sourceStart: number;
+  /** The clip on the timeline uses the whole source file (no trim needed). */
+  wholeSource: boolean;
+  /** The source's shape, for the trim (so a wide clip isn't boxed into a tall frame). */
+  aspect: "16:9" | "9:16" | "1:1";
+}
+
+/** "1920x1080" -> the nearest of 16:9, 9:16, 1:1. */
+export function nearestAspect(resolution: string): "16:9" | "9:16" | "1:1" {
+  const match = /(\d+)\s*[x×]\s*(\d+)/i.exec(resolution);
+  if (!match) return "16:9";
+  const ratio = Number(match[1]) / Number(match[2]);
+  const options: ["16:9" | "9:16" | "1:1", number][] = [["16:9", 16 / 9], ["9:16", 9 / 16], ["1:1", 1]];
+  return options.reduce((best, item) => (Math.abs(Math.log(ratio / item[1])) < Math.abs(Math.log(ratio / best[1])) ? item : best))[0];
 }
 
 export interface Placed {
@@ -83,13 +98,22 @@ export class ResolveHost {
     if (!filePath) throw new Error("This clip has no source file on disk (generated or compound clips can't be sent).");
     const fps = await this.fps(timeline);
     const durationFrames = Number(await item.GetDuration());
+    // The part of the source the timeline uses: GetLeftOffset is how far the clip's head is trimmed.
+    const leftOffset = Math.max(0, Number(await item.GetLeftOffset()) || 0);
+    const sourceFps = Number(await poolItem.GetClipProperty("FPS")) || fps;
+    const sourceFrames = Number(await poolItem.GetClipProperty("Frames")) || 0;
+    const seconds = durationFrames / fps;
+    const sourceSeconds = sourceFrames > 0 ? sourceFrames / sourceFps : 0;
     return {
       name: String(await item.GetName()),
       filePath,
       recordFrame: Number(await item.GetStart()),
       durationFrames,
       fps,
-      seconds: durationFrames / fps,
+      seconds,
+      sourceStart: leftOffset / fps,
+      wholeSource: leftOffset === 0 && sourceSeconds > 0 && Math.abs(sourceSeconds - seconds) < 0.1,
+      aspect: nearestAspect(String((await poolItem.GetClipProperty("Resolution")) ?? "")),
     };
   }
 

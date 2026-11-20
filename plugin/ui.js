@@ -221,7 +221,19 @@
       go.disabled = missingRequired(a);
       return;
     }
-    go.textContent = q.free ? "Create · Free" : `Create · ${fmt(q.credits)} credits`;
+    const cost = q.free ? "Free" : `${fmt(q.credits)} credits`;
+    go.textContent = "";
+    if (q.wholeSourcePrice) {
+      // Cutting the used part failed: say plainly the price is for the whole source file.
+      const sub = document.createElement("span");
+      sub.className = "sub";
+      sub.textContent = "Priced on the whole source clip";
+      go.append(document.createTextNode(`Create · ${cost}`), sub);
+    } else if (q.seconds !== undefined && q.verb) {
+      go.textContent = `${q.verb} · ${q.seconds.toFixed(1)} s · ${cost}`;
+    } else {
+      go.textContent = `Create · ${cost}`;
+    }
     const needsTick = a.consent && !consentBox.checked;
     go.disabled = !q.affordable || needsTick;
     if (!q.affordable) getCreditsBtn.hidden = false;

@@ -7,6 +7,8 @@ First release.
 - Workflow Integration plugin for DaVinci Resolve Studio: sign in with your PopNow account; Edit
   video, Video to audio, Video translator, Upscale and Reframe on the clip under the playhead;
   Edit image and Image to video on the current frame; Text to video, Music and Voiceover.
+- Clip actions price and send only the part of the clip on the timeline (cut for free first);
+  the button shows the seconds, and says so when it has to price the whole source instead.
 - Results go into the PopNow bin and onto a new track, lined up with the clip or the playhead.
 - The price is on the button and is the limit for the run; nothing starts until you click it.
 - Script version (Workspace > Scripts > PopNow) with Edit image, Image to video, Video to audio

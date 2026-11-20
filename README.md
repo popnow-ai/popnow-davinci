@@ -41,8 +41,11 @@ from Blackmagic is bundled here. The script needs Python 3.6 or later installed 
   (`~/Library/Application Support/PopNow/davinci-resolve.json`, or `%APPDATA%\PopNow` on
   Windows); the plugin and the script share it. **Sign out** in the ⋯ menu removes it.
 - **Clip** works on the clip under the playhead on the top video track (Resolve's scripting API
-  has no "selected clips" call). Its source file is sent to your PopNow account; long source
-  files take longer to send.
+  has no "selected clips" call). Its source file is sent to your PopNow account (free), then
+  only the part on your timeline is cut out (free) and that part is what gets priced and used:
+  the button reads like `Edit · 3.0 s · 400 credits`. When the clip already uses the whole
+  source, there is no cut. If the cut fails, the button says **Priced on the whole source clip**
+  and still waits for your click.
 - **Frame** exports the frame under the playhead as a PNG and sends that.
 - **The price is on the button.** Clip and frame actions show `Get price` first; text actions
   price themselves as you type. Nothing is charged until you click `Create · N credits`, and the

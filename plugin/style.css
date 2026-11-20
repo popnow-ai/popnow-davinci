@@ -191,6 +191,8 @@ select.field { appearance: none; padding-right: 30px; background-image: linear-g
 .jelly[data-busy="true"] { color: transparent; }
 .jelly[data-busy="true"]::after { content: ""; position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px; border-radius: 50%; border: 2px solid var(--jelly-off-ink); border-top-color: transparent; animation: spin .8s linear infinite; }
 .go { width: 100%; }
+.go .sub { display: block; margin-top: 3px; font: 600 11px/1 var(--f-body); opacity: .85; }
+.go:has(.sub) { height: 50px; }
 
 .link { border: 0; padding: 0; background: none; color: var(--ink-70); text-decoration: underline; text-decoration-color: var(--ink-30); text-underline-offset: 3px; font-size: 12px; white-space: nowrap; }
 .link:hover { color: var(--ink); text-decoration-color: currentColor; }

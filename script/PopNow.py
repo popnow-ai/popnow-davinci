@@ -585,7 +585,7 @@ ACTIONS = [
      "prompt": "What to change", "placeholder": "Golden hour light, add fog"},
     {"id": "frame-to-video", "title": "Image to video", "tool": "create_video", "source": "frame", "output": "video",
      "prompt": "What happens", "placeholder": "Slow push in as the door opens"},
-    {"id": "add-sound", "title": "Video to audio", "tool": "add_sound", "source": "clip", "output": "audio",
+    {"id": "add-sound", "title": "Video to audio", "verb": "Add sound", "tool": "add_sound", "source": "clip", "output": "audio",
      "prompt": "Sounds (optional)", "placeholder": "Rain on a window, distant thunder"},
 ]
 
@@ -640,6 +640,29 @@ def job_from(result):
     return {"job_id": data.get("job_id"), "status": status, "files": files, "credits": data.get("credits"), "text": result_text(result)}
 
 
+def trim(client, source, start_seconds, duration_seconds, aspect):
+    """Cuts the used part of an uploaded source with the free compose_video; returns the cut's link."""
+    result = client.call("compose_video", {
+        "clips": [{"url": source, "start_seconds": round(start_seconds, 3), "duration_seconds": round(duration_seconds, 3)}],
+        "aspect_ratio": aspect,
+    })
+    outcome = outcome_of(result)
+    if outcome["kind"] != "started":
+        raise PopNowError(outcome.get("text") or "PopNow could not cut the clip.")
+    job = outcome["job"]
+    deadline = time.time() + 300
+    while not is_done(job):
+        if not job.get("job_id") or time.time() > deadline:
+            raise PopNowError("PopNow could not cut the clip.")
+        job_id = job["job_id"]
+        job = job_from(client.call("get_job", {"job_id": job_id, "wait_seconds": 10}))
+        job["job_id"] = job.get("job_id") or job_id
+    links = [f.get("popnow_link") for f in job["files"] if isinstance(f.get("popnow_link"), str)]
+    if job["status"] != "succeeded" or not links:
+        raise PopNowError(job["text"] or "PopNow could not cut the clip.")
+    return links[0]
+
+
 def is_done(job):
     return job["status"] in ("succeeded", "failed", "blocked")
 
@@ -690,6 +713,7 @@ class Controller(object):
         self.now = now or time.time
         self.pending = {}
         self.uploads = {}
+        self.trims = {}
         self.login_cancel = None
         self.stop = threading.Event()
 
@@ -712,6 +736,7 @@ class Controller(object):
             revoke(session)
         delete_session(self.path)
         self.uploads.clear()
+        self.trims.clear()
         self.pending.clear()
 
     def balance(self):
@@ -730,11 +755,25 @@ class Controller(object):
         action = action_by_id(action_id)
         client = Client(self.path)
         clip_seconds = None
+        clip_info = None
         if action["source"] == "clip":
             clip = self.host.current_clip()
             status("Sending %s…" % clip["name"])
-            media = self._link(client, clip["file_path"])
+            source = self._link(client, clip["file_path"])
+            media = source
             record_frame, clip_seconds = clip["record_frame"], clip["seconds"]
+            whole_price = False
+            if not clip.get("whole_source", True):
+                # Price and send only the part on the timeline: cut it with the free compose_video first.
+                key = (source, round(clip["source_start"], 3), round(clip["seconds"], 3), clip.get("aspect", "16:9"))
+                try:
+                    if key not in self.trims:
+                        status("Cutting %.1f s…" % clip["seconds"])
+                        self.trims[key] = trim(client, source, clip["source_start"], clip["seconds"], clip.get("aspect", "16:9"))
+                    media = self.trims[key]
+                except PopNowError:
+                    whole_price = True  # the button says so; nothing starts without a click
+            clip_info = {"seconds": clip["seconds"], "whole_source_price": whole_price}
         else:
             if not os.path.isdir(self.temp_folder):
                 os.makedirs(self.temp_folder)
@@ -748,16 +787,19 @@ class Controller(object):
         data = structured(result)
         if result.get("isError") or not isinstance(data.get("credits"), (int, float)):
             raise PopNowError(result_text(result) or "PopNow could not price this.")
-        return self._remember(action, args, int(data["credits"]), data.get("balance"), record_frame)
+        return self._remember(action, args, int(data["credits"]), data.get("balance"), record_frame, clip_info)
 
-    def _remember(self, action, args, credits, balance, record_frame):
+    def _remember(self, action, args, credits, balance, record_frame, clip=None):
         now = self.now()
         for key in [k for k, v in self.pending.items() if v["expires"] < now]:
             del self.pending[key]
         quote_id = secrets.token_urlsafe(9)
-        self.pending[quote_id] = {"action": action, "args": args, "credits": credits, "record_frame": record_frame, "expires": now + QUOTE_TTL}
+        self.pending[quote_id] = {"action": action, "args": args, "credits": credits, "record_frame": record_frame, "expires": now + QUOTE_TTL, "clip": clip}
         affordable = not isinstance(balance, (int, float)) or credits <= balance
-        return {"quote_id": quote_id, "credits": credits, "balance": balance, "affordable": affordable}
+        quote = {"quote_id": quote_id, "credits": credits, "balance": balance, "affordable": affordable}
+        if clip:
+            quote.update({"seconds": clip["seconds"], "verb": action.get("verb"), "whole_source_price": clip["whole_source_price"]})
+        return quote
 
     def create(self, quote_id, consent=False, status=lambda text: None):
         """Starts at exactly the quoted price, waits, downloads and places the result."""
@@ -776,7 +818,7 @@ class Controller(object):
         outcome = outcome_of(client.call(item["action"]["tool"], args))
         if outcome["kind"] == "price_changed":
             # Never follow a higher price: it goes back to the user as a new quote.
-            again = self._remember(item["action"], item["args"], outcome["credits"], None, item["record_frame"])
+            again = self._remember(item["action"], item["args"], outcome["credits"], None, item["record_frame"], item.get("clip"))
             return {"kind": "price_changed", "quote": again}
         if outcome["kind"] == "needs_consent":
             # Nothing started; the same price stays on the button until the user ticks the box.
@@ -827,6 +869,21 @@ def timecode_to_frames(timecode, fps):
     return ((h * 60 + m) * 60 + s) * base + f
 
 
+def nearest_aspect(resolution):
+    """'1920x1080' -> the nearest of 16:9, 9:16, 1:1 (the shape for the free cut)."""
+    import math
+    match = re.search(r"(\d+)\s*[x\u00d7]\s*(\d+)", resolution or "", re.I)
+    if not match:
+        return "16:9"
+    ratio = float(match.group(1)) / float(match.group(2))
+    best = None
+    for name, value in (("16:9", 16 / 9.0), ("9:16", 9 / 16.0), ("1:1", 1.0)):
+        distance = abs(math.log(ratio / value))
+        if best is None or distance < best[1]:
+            best = (name, distance)
+    return best[0]
+
+
 class ResolveHost(object):
     def __init__(self, resolve):
         self.resolve = resolve
@@ -862,7 +919,20 @@ class ResolveHost(object):
             raise PopNowError("This clip has no source file on disk (generated or compound clips can't be sent).")
         fps = self._fps(timeline)
         frames = int(item.GetDuration())
-        return {"name": item.GetName(), "file_path": path, "record_frame": int(item.GetStart()), "seconds": frames / fps}
+        seconds = frames / fps
+        left = max(0, int(item.GetLeftOffset() or 0))
+        try:
+            source_fps = float(pool_item.GetClipProperty("FPS")) or fps
+        except (TypeError, ValueError):
+            source_fps = fps
+        try:
+            source_seconds = int(pool_item.GetClipProperty("Frames")) / source_fps
+        except (TypeError, ValueError):
+            source_seconds = 0
+        return {"name": item.GetName(), "file_path": path, "record_frame": int(item.GetStart()), "seconds": seconds,
+                "source_start": left / fps,
+                "whole_source": left == 0 and source_seconds > 0 and abs(source_seconds - seconds) < 0.1,
+                "aspect": nearest_aspect(str(pool_item.GetClipProperty("Resolution") or ""))}
 
     def export_frame(self, folder, name):
         project = self._project()
@@ -916,6 +986,16 @@ class ResolveHost(object):
 PAPER, PLUM, ORANGE = "#FAF4E8", "#352242", "#E65A2F"
 
 
+def button_label(quote):
+    """'Add sound · 3.0 s · 30 credits'; when the cut failed, the whole-source price says so."""
+    cost = "{:,} credits".format(quote["credits"])
+    if quote.get("whole_source_price"):
+        return "Create · %s\nPriced on the whole source clip" % cost
+    if quote.get("seconds") is not None and quote.get("verb"):
+        return "%s · %.1f s · %s" % (quote["verb"], quote["seconds"], cost)
+    return "Create · " + cost
+
+
 def run_uimanager(resolve, controller, fusion, bmd):
     ui = fusion.UIManager
     disp = bmd.UIDispatcher(ui)
@@ -966,7 +1046,7 @@ def run_uimanager(resolve, controller, fusion, bmd):
             items["Go"].Enabled = False
             return
         if quote:
-            items["Go"].Text = "Create · {:,} credits".format(quote["credits"])
+            items["Go"].Text = button_label(quote)
             items["Go"].Enabled = quote["affordable"]
         else:
             items["Go"].Text = "Get price"
@@ -1131,7 +1211,8 @@ function paint(s) {
   $("signin").hidden = s.signedIn; $("work").hidden = !s.signedIn; $("signout").hidden = !s.signedIn;
   if (s.balance != null) $("bal").textContent = fmt(s.balance) + " credits";
   $("go").disabled = busy || (quote && !quote.affordable);
-  $("go").textContent = quote ? "Create · " + fmt(quote.credits) + " credits" : "Get price";
+  $("go").textContent = !quote ? "Get price" : quote.whole_source_price ? "Create · " + fmt(quote.credits) + " credits — priced on the whole source clip"
+    : quote.seconds != null && quote.verb ? quote.verb + " · " + quote.seconds.toFixed(1) + " s · " + fmt(quote.credits) + " credits" : "Create · " + fmt(quote.credits) + " credits";
   $("credits").hidden = !(quote && !quote.affordable); $("stop").hidden = !busy || !quote_running;
 }
 let quote_running = false;

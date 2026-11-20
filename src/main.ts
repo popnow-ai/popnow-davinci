@@ -94,7 +94,7 @@ const record = (value: unknown): Record<string, unknown> =>
 
 function wire(): void {
   handle("actions", () =>
-    ACTIONS.map(({ id, title, source, output, free, consent, fields }) => ({ id, title, source, output, free: free === true, consent: consent === true, fields })),
+    ACTIONS.map(({ id, title, verb, source, output, free, consent, fields }) => ({ id, title, verb, source, output, free: free === true, consent: consent === true, fields })),
   );
   handle("status", () => panel.status());
   handle("login", () => panel.login());
