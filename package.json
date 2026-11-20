@@ -1,0 +1,29 @@
+{
+  "name": "popnow-davinci",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PopNow for DaVinci Resolve: edit clips, add sound, dub, upscale and reframe, and turn frames or text into video, music and voiceovers with your PopNow credits.",
+  "license": "MIT",
+  "author": "PopNow AI, LLC (https://popnow.ai)",
+  "homepage": "https://popnow.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/popnow-ai/popnow-davinci.git"
+  },
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/build.mjs && node scripts/package.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "test:script": "python3 -m unittest discover -s script/tests -v"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}

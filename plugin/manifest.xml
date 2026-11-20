@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BlackmagicDesign>
+    <Plugin>
+        <Id>ai.popnow.resolve</Id>
+        <Name>PopNow</Name>
+        <Version>0.1.0</Version>
+        <Description>Edit clips, add sound, translate, upscale and reframe, and turn frames or text into video, music and voiceovers with your PopNow credits.</Description>
+        <FilePath>main.js</FilePath>
+    </Plugin>
+</BlackmagicDesign>

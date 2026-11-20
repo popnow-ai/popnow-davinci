@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>PopNow</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app" id="app" data-phase="loading">
+    <section class="gate" aria-labelledby="gate-title">
+      <img class="gate-logo" src="img/popnow.png" alt="" width="72" height="72">
+      <h1 id="gate-title" class="gate-title">Create in your timeline</h1>
+      <button class="jelly" id="sign-in" type="button">Sign in to PopNow</button>
+      <div class="gate-wait" role="status"><span class="spinner" aria-hidden="true"></span>Finish signing in in your browser</div>
+      <button class="link gate-cancel" id="sign-in-cancel" type="button">Cancel</button>
+      <p class="gate-error" id="gate-error" role="alert"></p>
+    </section>
+
+    <section class="work" aria-label="PopNow">
+      <header class="top">
+        <picture class="mark">
+          <source srcset="img/wordmark-dark.png" media="(prefers-color-scheme: dark)">
+          <img src="img/wordmark.png" alt="PopNow" height="18">
+        </picture>
+        <button class="balance" id="balance" type="button" title="Get credits"><span id="balance-text">—</span></button>
+        <div class="menu-wrap">
+          <button class="icon-btn" id="menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Account">
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="13" cy="8" r="1.4" fill="currentColor"/></svg>
+          </button>
+          <div class="menu" id="menu" role="menu" hidden>
+            <button type="button" role="menuitem" id="menu-library">My library</button>
+            <button type="button" role="menuitem" id="menu-credits">Get credits</button>
+            <button type="button" role="menuitem" id="menu-sign-out">Sign out</button>
+          </div>
+        </div>
+      </header>
+
+      <nav class="tabs" role="tablist" aria-label="Source">
+        <button role="tab" type="button" data-tab="clip" aria-selected="true">Clip</button>
+        <button role="tab" type="button" data-tab="frame" aria-selected="false">Frame</button>
+        <button role="tab" type="button" data-tab="text" aria-selected="false">Text</button>
+      </nav>
+
+      <main class="body">
+        <div class="context" id="context" aria-live="polite"></div>
+        <div class="chips" id="chips" role="radiogroup" aria-label="Action"></div>
+        <form class="fields" id="fields" autocomplete="off"></form>
+        <label class="consent" id="consent-row" hidden>
+          <input type="checkbox" id="consent">
+          <span>The face and voice are mine or I have permission. Nobody in it is under 18.</span>
+        </label>
+      </main>
+
+      <footer class="foot">
+        <button class="jelly go" id="go" type="button" data-primary-action>Get price</button>
+        <div class="foot-row">
+          <div class="status" id="status" role="status"></div>
+          <button class="link" id="get-credits" type="button" hidden>Get credits</button>
+          <button class="link" id="stop" type="button" hidden title="It keeps going on PopNow and is saved to your library">Stop waiting</button>
+        </div>
+      </footer>
+    </section>
+  </div>
+  <script src="ui.js"></script>
+</body>
+</html>
